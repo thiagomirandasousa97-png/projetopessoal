@@ -77,11 +77,20 @@ export default function ClientsPage() {
       return;
     }
     if (receivablesRes.error) {
-      toast.error("Erro ao carregar inadimplencia.");
-      return;
+      console.error(receivablesRes.error);
+      toast.error("Nao foi possivel carregar inadimplencia agora. Cadastro de cliente continua disponivel.");
     }
 
-    const allReceivables = (receivablesRes.data ?? []).map((item) => ({
+    const allReceivables = ((receivablesRes.data ?? []) as Array<{
+      id: string | number;
+      client_id: string | number | null;
+      appointment_id: string | number | null;
+      description: string | null;
+      service_name: string | null;
+      amount: number | string | null;
+      due_date: string | null;
+      status: string | null;
+    }>).map((item) => ({
       id: String(item.id),
       client_id: item.client_id ? String(item.client_id) : null,
       appointment_id: item.appointment_id ? String(item.appointment_id) : null,
