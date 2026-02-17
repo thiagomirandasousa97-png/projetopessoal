@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { ChangeEvent, useEffect, useState } from "react";
 import PageHeader from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -18,11 +18,12 @@ type ProfessionalRow = {
   phone: string;
   specialty: string;
   commissionPercent: number;
+  photoUrl: string;
 };
 
 type ProfessionalStats = { totalRevenue: number; appointmentCount: number };
 
-const emptyForm = { name: "", email: "", phone: "", specialty: "", commissionPercentage: "0" };
+const emptyForm = { name: "", email: "", phone: "", specialty: "", commissionPercentage: "0", photoUrl: "" };
 
 export default function ProfessionalsPage() {
   const { user } = useAuth();
@@ -36,7 +37,7 @@ export default function ProfessionalsPage() {
     try {
       const { data, error } = await supabase
         .from("professionals")
-        .select("id, name, email, phone, specialties, commission_percent")
+        .select("id, name, email, phone, specialties, commission_percent, photo_url")
         .order("name", { ascending: true });
       if (error) throw error;
       setItems((data ?? []).map((p) => ({
@@ -46,6 +47,7 @@ export default function ProfessionalsPage() {
         phone: String(p.phone ?? ""),
         specialty: (p.specialties ?? []).join(", "),
         commissionPercent: Number(p.commission_percent ?? 0),
+        photoUrl: String(p.photo_url ?? ""),
       })));
 
       const { data: appointments } = await supabase
@@ -85,6 +87,7 @@ export default function ProfessionalsPage() {
       phone: item.phone ?? "",
       specialty: item.specialty,
       commissionPercentage: String(item.commissionPercent),
+      photoUrl: item.photoUrl ?? "",
     });
   };
 
@@ -99,6 +102,7 @@ export default function ProfessionalsPage() {
         phone: form.phone || null,
         specialties: form.specialty ? form.specialty.split(",").map((s) => s.trim()).filter(Boolean) : [],
         commission_percent: Number(form.commissionPercentage || 0),
+        photo_url: form.photoUrl || null,
       };
       if (editingId) {
         const { error } = await supabase.from("professionals").update(body).eq("id", editingId);
@@ -133,6 +137,18 @@ export default function ProfessionalsPage() {
     }
   };
 
+  const onPhotoUpload = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        setForm((prev) => ({ ...prev, photoUrl: reader.result as string }));
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
   const renderFormFields = () => (
     <div className="space-y-3 mt-2">
       <div><Label>Nome</Label><Input value={form.name} onChange={(e) => setForm((s) => ({ ...s, name: e.target.value }))} /></div>
@@ -140,6 +156,8 @@ export default function ProfessionalsPage() {
       <div><Label>Telefone</Label><Input value={form.phone} onChange={(e) => setForm((s) => ({ ...s, phone: e.target.value }))} /></div>
       <div><Label>Especialidades (separadas por virgula)</Label><Input value={form.specialty} onChange={(e) => setForm((s) => ({ ...s, specialty: e.target.value }))} /></div>
       <div><Label>Comissao (%)</Label><Input type="number" min="0" max="100" value={form.commissionPercentage} onChange={(e) => setForm((s) => ({ ...s, commissionPercentage: e.target.value }))} /></div>
+      <div><Label>Foto (URL)</Label><Input value={form.photoUrl} onChange={(e) => setForm((s) => ({ ...s, photoUrl: e.target.value }))} placeholder="https://..." /></div>
+      <div><Label>Ou enviar foto</Label><Input type="file" accept=".png,.jpg,.jpeg,image/png,image/jpeg" onChange={onPhotoUpload} /></div>
       <Button className="w-full gradient-primary text-primary-foreground" disabled={!isAdmin} onClick={() => void save()}>{editingId ? "Salvar" : "Cadastrar"}</Button>
     </div>
   );
@@ -172,9 +190,13 @@ export default function ProfessionalsPage() {
               <CardContent className="pt-5">
                 <div className="flex items-start justify-between">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full gradient-primary flex items-center justify-center text-primary-foreground font-semibold text-sm">
-                      {item.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
-                    </div>
+                    {item.photoUrl ? (
+                      <img src={item.photoUrl} alt={item.name} className="w-10 h-10 rounded-full object-cover" />
+                    ) : (
+                      <div className="w-10 h-10 rounded-full gradient-primary flex items-center justify-center text-primary-foreground font-semibold text-sm">
+                        {item.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}
+                      </div>
+                    )}
                     <div>
                       <p className="font-semibold">{item.name}</p>
                       <p className="text-xs text-muted-foreground">{item.email || "-"} • {item.phone || "-"}</p>

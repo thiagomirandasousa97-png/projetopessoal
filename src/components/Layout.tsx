@@ -1,6 +1,7 @@
 import { ReactNode, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
+  LayoutDashboard,
   Calendar,
   Users,
   UserCog,
@@ -18,6 +19,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useAppConfig } from "@/lib/app-config";
 
 const navItems = [
+  { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
   { title: "Agenda", url: "/agenda", icon: Calendar },
   { title: "Clientes", url: "/clientes", icon: Users },
   { title: "Profissionais", url: "/profissionais", icon: UserCog },

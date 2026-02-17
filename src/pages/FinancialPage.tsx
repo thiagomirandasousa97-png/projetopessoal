@@ -36,6 +36,17 @@ type PayableRow = {
   status: "paid" | "pending" | "overdue";
 };
 
+type CashSessionRow = {
+  id: string;
+  openingAmount: number;
+  closingAmount: number | null;
+  openedBy: string;
+  closedBy: string | null;
+  openedAt: string;
+  closedAt: string | null;
+  status: "open" | "closed";
+};
+
 function normalizeStatus(value: unknown, dueDate: string): "paid" | "pending" | "overdue" {
   const status = String(value ?? "").toLowerCase();
   if (status === "paid" || status === "pago") return "paid";
@@ -48,17 +59,22 @@ export default function FinancialPage() {
   const { user } = useAuth();
   const [receivables, setReceivables] = useState<ReceivableRow[]>([]);
   const [payables, setPayables] = useState<PayableRow[]>([]);
+  const [cashSessions, setCashSessions] = useState<CashSessionRow[]>([]);
   const [newPayable, setNewPayable] = useState({ description: "", value: "", date: "", category: "Fixa" });
 
   const load = async () => {
     if (!user) return;
 
-    const [receivablesRes, payablesRes] = await Promise.all([
+    const [receivablesRes, payablesRes, cashRes] = await Promise.all([
       supabase
         .from("financial_receivables")
         .select("id, appointment_id, client_id, client_name, service_name, description, amount, created_at, service_date, due_date, status, payment_method")
         .order("created_at", { ascending: false }),
       supabase.from("financial_payables").select("id, description, amount, due_date, status, category").order("created_at", { ascending: false }),
+      supabase
+        .from("cash_sessions")
+        .select("id, opening_amount, closing_amount, opened_by, closed_by, opened_at, closed_at, status")
+        .order("opened_at", { ascending: false }),
     ]);
 
     if (!receivablesRes.error) {
@@ -89,6 +105,21 @@ export default function FinancialPage() {
           amount: Number(item.amount ?? 0),
           dueDate: String(item.due_date ?? ""),
           status: normalizeStatus(item.status, String(item.due_date ?? "")),
+        })),
+      );
+    }
+
+    if (!cashRes.error) {
+      setCashSessions(
+        (cashRes.data ?? []).map((item) => ({
+          id: String(item.id),
+          openingAmount: Number(item.opening_amount ?? 0),
+          closingAmount: item.closing_amount === null ? null : Number(item.closing_amount),
+          openedBy: String(item.opened_by ?? ""),
+          closedBy: item.closed_by ? String(item.closed_by) : null,
+          openedAt: String(item.opened_at ?? ""),
+          closedAt: item.closed_at ? String(item.closed_at) : null,
+          status: (String(item.status ?? "open") === "closed" ? "closed" : "open"),
         })),
       );
     }
@@ -161,6 +192,7 @@ export default function FinancialPage() {
           <TabsTrigger value="receivables">Contas a Receber</TabsTrigger>
           <TabsTrigger value="payables">Contas a Pagar</TabsTrigger>
           <TabsTrigger value="debtors">Inadimplencia</TabsTrigger>
+          <TabsTrigger value="cash">Caixa</TabsTrigger>
         </TabsList>
 
         <TabsContent value="receivables" className="space-y-4">
@@ -269,6 +301,41 @@ export default function FinancialPage() {
                     <td className="py-3">
                       <span className={cn("px-2 py-0.5 rounded-full text-xs font-medium", row.overdueDays > 30 ? "bg-destructive/15 text-destructive" : row.overdueDays >= 20 ? "bg-warning/15 text-warning" : "bg-success/15 text-success")}>
                         {row.overdueDays > 30 ? "Vermelho" : row.overdueDays >= 20 ? "Amarelo" : "Verde"}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="cash">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border text-left text-muted-foreground">
+                  <th className="pb-2">Abertura</th>
+                  <th className="pb-2">Quem abriu</th>
+                  <th className="pb-2">Fechamento</th>
+                  <th className="pb-2">Quem fechou</th>
+                  <th className="pb-2">Valor inicial</th>
+                  <th className="pb-2">Valor final</th>
+                  <th className="pb-2">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {cashSessions.map((session) => (
+                  <tr key={session.id} className="border-b border-border/50 hover:bg-muted/30 transition-colors">
+                    <td className="py-3">{new Date(session.openedAt).toLocaleString("pt-BR")}</td>
+                    <td className="py-3">{session.openedBy}</td>
+                    <td className="py-3">{session.closedAt ? new Date(session.closedAt).toLocaleString("pt-BR") : "-"}</td>
+                    <td className="py-3">{session.closedBy || "-"}</td>
+                    <td className="py-3">{toCurrency(session.openingAmount)}</td>
+                    <td className="py-3">{session.closingAmount === null ? "-" : toCurrency(session.closingAmount)}</td>
+                    <td className="py-3">
+                      <span className={cn("px-2 py-0.5 rounded-full text-xs font-medium", session.status === "closed" ? "bg-success/15 text-success" : "bg-warning/15 text-warning")}>
+                        {session.status === "closed" ? "Fechado" : "Aberto"}
                       </span>
                     </td>
                   </tr>

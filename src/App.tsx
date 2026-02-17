@@ -38,7 +38,8 @@ function AppRoutes() {
     <Routes>
       <Route path="/login" element={user ? <Navigate to="/" replace /> : <LoginPage />} />
       <Route element={<ProtectedLayout />}>
-        <Route path="/" element={<Dashboard />} />
+        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/agenda" element={<CalendarPage />} />
         <Route path="/clientes" element={<ClientsPage />} />
         <Route path="/profissionais" element={<ProfessionalsPage />} />

@@ -142,6 +142,12 @@ export default function CalendarPage() {
 
     const grouped: Record<string, CalendarAppointment[]> = {};
     for (const row of appointmentsRes.data ?? []) {
+      const rawPaymentStatus = String(row.payment_status ?? "unpaid");
+      if (rawPaymentStatus === "open_account") {
+        // It is now managed only in financial receivables.
+        continue;
+      }
+
       const startTime = row.start_time ? new Date(row.start_time) : null;
       if (!startTime) continue;
 
@@ -156,7 +162,6 @@ export default function CalendarPage() {
           ? rawStatus
           : "scheduled"
       ) as CalendarAppointment["status"];
-      const rawPaymentStatus = String(row.payment_status ?? "unpaid");
       const safePaymentStatus = (
         ["unpaid", "paid", "open_account"].includes(rawPaymentStatus) ? rawPaymentStatus : "unpaid"
       ) as CalendarAppointment["paymentStatus"];
