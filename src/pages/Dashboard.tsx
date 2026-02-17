@@ -1,197 +1,129 @@
-import { Calendar, Users, DollarSign, Clock, Bell, Trophy } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { toCurrency } from "@/lib/database";
-import { useAuth } from "@/hooks/use-auth";
-import StatCard from "@/components/StatCard";
+import { Calendar, CheckCircle2, DollarSign, Users, Wallet } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
-import { motion } from "framer-motion";
+import StatCard from "@/components/StatCard";
 import { supabase } from "@/integrations/supabase/client";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { useDashboardAlerts } from "@/hooks/use-dashboard-alerts";
+import { toCurrency } from "@/lib/database";
+import { paymentMethodLabel } from "@/lib/payments";
 
-type Appointment = {
-  id: string;
-  time: string;
-  date: string;
-  client: string;
-  service: string;
-  servicePrice: number;
-  professional: string;
-  professionalId: string;
+type ReceivableRow = {
+  amount: number;
   status: string;
+  due_date: string;
+  paid_at: string | null;
+  payment_method: string | null;
+  client_id: string | null;
 };
 
-const statusColors: Record<string, string> = {
-  scheduled: "bg-warning/15 text-warning",
-  confirmed: "bg-primary/15 text-primary",
-  rescheduled: "bg-accent/15 text-accent",
-  completed: "bg-success/15 text-success",
-  cancelled: "bg-destructive/15 text-destructive",
-};
-
-const statusLabels: Record<string, string> = {
-  scheduled: "Agendado",
-  confirmed: "Confirmado",
-  rescheduled: "Reagendado",
-  completed: "Finalizado",
-  cancelled: "Cancelado",
+type AppointmentRow = {
+  status: string;
+  start_time: string;
 };
 
 export default function Dashboard() {
-  const { user } = useAuth();
-  const [monthlyRevenue, setMonthlyRevenue] = useState(0);
-  const [appointmentsToday, setAppointmentsToday] = useState<Appointment[]>([]);
-  const [birthdaysToday, setBirthdaysToday] = useState(0);
-  const [overdueCount, setOverdueCount] = useState(0);
-  const [topProfessional, setTopProfessional] = useState("-");
-  const [showAlertModal, setShowAlertModal] = useState(true);
+  const [receivables, setReceivables] = useState<ReceivableRow[]>([]);
+  const [appointments, setAppointments] = useState<AppointmentRow[]>([]);
 
   const load = async () => {
-    if (!user) return;
-    const today = new Date().toISOString().slice(0, 10);
-    const monthStart = new Date();
-    monthStart.setDate(1);
-    monthStart.setHours(0, 0, 0, 0);
-
-    const [appointmentsRes, clientsRes, financeRes] = await Promise.all([
-      supabase
-        .from("appointments")
-        .select("id, client_id, service_id, professional_id, start_time, status, clients(name), services(name,price), professionals(name)"),
-      supabase.from("clients").select("id, birth_date"),
-      supabase
-        .from("financial_receivables")
-        .select("id, amount, status, due_date, created_at"),
+    const [receivablesRes, appointmentsRes] = await Promise.all([
+      supabase.from("financial_receivables").select("amount, status, due_date, paid_at, payment_method, client_id"),
+      supabase.from("appointments").select("status, start_time"),
     ]);
 
-    if (appointmentsRes.error || clientsRes.error || financeRes.error) {
-      return;
-    }
-
-    const allAppointments = (appointmentsRes.data ?? []).map((row) => {
-      const start = new Date(row.start_time);
-      const client = Array.isArray(row.clients) ? row.clients[0] : row.clients;
-      const service = Array.isArray(row.services) ? row.services[0] : row.services;
-      const professional = Array.isArray(row.professionals) ? row.professionals[0] : row.professionals;
-      return {
-        id: String(row.id),
-        date: start.toISOString().slice(0, 10),
-        time: start.toTimeString().slice(0, 5),
-        client: String(client?.name ?? "Cliente"),
-        service: String(service?.name ?? "Serviço"),
-        servicePrice: Number(service?.price ?? 0),
-        professional: String(professional?.name ?? "Profissional"),
-        professionalId: String(row.professional_id ?? ""),
-        status: String(row.status ?? "scheduled"),
-      };
-    });
-
-    const todayAppointments = allAppointments
-      .filter((a) => a.date === today)
-      .sort((a, b) => a.time.localeCompare(b.time));
-    setAppointmentsToday(todayAppointments);
-
-    const monthDay = today.slice(5, 10);
-    const bCount = (clientsRes.data ?? []).filter(
-      (c) => String(c.birth_date ?? "").slice(5, 10) === monthDay,
-    ).length;
-    setBirthdaysToday(bCount);
-
-    const paidThisMonth = (financeRes.data ?? []).filter(
-      (f) => f.status === "paid" && new Date(String(f.created_at)).getTime() >= monthStart.getTime(),
-    );
-    setMonthlyRevenue(paidThisMonth.reduce((acc, item) => acc + Number(item.amount ?? 0), 0));
-
-    const overdue = (financeRes.data ?? []).filter((f) => {
-      if (f.status === "paid") return false;
-      return new Date(`${f.due_date}T00:00:00`).getTime() < Date.now();
-    });
-    setOverdueCount(overdue.length);
-
-    const professionalRevenue = new Map<string, number>();
-    for (const appointment of allAppointments) {
-      if (appointment.status !== "completed") continue;
-      const value = appointment.servicePrice;
-      professionalRevenue.set(
-        appointment.professional,
-        (professionalRevenue.get(appointment.professional) ?? 0) + Number(value),
+    if (!receivablesRes.error) {
+      setReceivables(
+        (receivablesRes.data ?? []).map((item) => ({
+          amount: Number(item.amount ?? 0),
+          status: String(item.status ?? "pending"),
+          due_date: String(item.due_date ?? ""),
+          paid_at: item.paid_at ? String(item.paid_at) : null,
+          payment_method: item.payment_method ? String(item.payment_method) : null,
+          client_id: item.client_id ? String(item.client_id) : null,
+        })),
       );
     }
 
-    const best = Array.from(professionalRevenue.entries()).sort((a, b) => b[1] - a[1])[0];
-    setTopProfessional(best?.[0] ?? "-");
+    if (!appointmentsRes.error) {
+      setAppointments(
+        (appointmentsRes.data ?? []).map((item) => ({
+          status: String(item.status ?? "scheduled"),
+          start_time: String(item.start_time ?? ""),
+        })),
+      );
+    }
   };
 
   useEffect(() => {
     void load();
-  }, [user]);
+  }, []);
 
-  const alerts = useDashboardAlerts({
-    overdueCount,
-    birthdaysToday,
-    appointmentsToday: appointmentsToday.length,
-  });
+  const today = new Date().toISOString().slice(0, 10);
 
-  const revenueText = useMemo(() => toCurrency(monthlyRevenue), [monthlyRevenue]);
+  const metrics = useMemo(() => {
+    const pendingReceivables = receivables.filter((item) => item.status === "pending");
+    const totalToReceive = pendingReceivables.reduce((acc, item) => acc + item.amount, 0);
+
+    const receivedToday = receivables
+      .filter((item) => item.status === "paid" && String(item.paid_at ?? "").slice(0, 10) === today)
+      .reduce((acc, item) => acc + item.amount, 0);
+
+    const delinquentClientIds = new Set(
+      pendingReceivables
+        .filter((item) => item.due_date && item.due_date < today)
+        .map((item) => item.client_id)
+        .filter((id): id is string => Boolean(id)),
+    );
+
+    const appointmentsToday = appointments.filter((item) => item.start_time.slice(0, 10) === today);
+    const completedToday = appointmentsToday.filter((item) => item.status === "completed");
+
+    const paymentsByMethod = receivables
+      .filter((item) => item.status === "paid" && String(item.paid_at ?? "").slice(0, 10) === today)
+      .reduce<Record<string, number>>((acc, item) => {
+        const method = item.payment_method ?? "nao_informado";
+        acc[method] = (acc[method] ?? 0) + item.amount;
+        return acc;
+      }, {});
+
+    return {
+      totalToReceive,
+      receivedToday,
+      delinquentClients: delinquentClientIds.size,
+      appointmentsToday: appointmentsToday.length,
+      completedToday: completedToday.length,
+      paymentsByMethod,
+    };
+  }, [appointments, receivables, today]);
+
+  const paymentEntries = Object.entries(metrics.paymentsByMethod);
 
   return (
-    <div>
-      <PageHeader title="Painel Inteligente" description="Visão SaaS avançada do salão" />
+    <div className="space-y-6">
+      <PageHeader title="Inicio" description="Resumo do dia com dados reais de agenda e financeiro." />
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
-        <StatCard title="Faturamento do Mês" value={revenueText} icon={<DollarSign className="h-5 w-5" />} />
-        <StatCard title="Agendamentos Hoje" value={appointmentsToday.length} icon={<Calendar className="h-5 w-5" />} />
-        <StatCard title="Aniversariantes" value={birthdaysToday} icon={<Users className="h-5 w-5" />} />
-        <StatCard title="Contas Vencidas" value={overdueCount} icon={<Bell className="h-5 w-5" />} />
-        <StatCard title="Top Profissional" value={topProfessional} icon={<Trophy className="h-5 w-5" />} />
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+        <StatCard title="Total a receber" value={toCurrency(metrics.totalToReceive)} icon={<Wallet className="h-5 w-5" />} />
+        <StatCard title="Valores recebidos no dia" value={toCurrency(metrics.receivedToday)} icon={<DollarSign className="h-5 w-5" />} />
+        <StatCard title="Clientes inadimplentes" value={metrics.delinquentClients} icon={<Users className="h-5 w-5" />} />
+        <StatCard title="Agendamentos do dia" value={metrics.appointmentsToday} icon={<Calendar className="h-5 w-5" />} />
+        <StatCard title="Atendimentos finalizados" value={metrics.completedToday} icon={<CheckCircle2 className="h-5 w-5" />} />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="lg:col-span-2 glass-card rounded-xl p-5">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="font-display text-lg font-semibold flex items-center gap-2"><Clock className="h-4 w-4 text-primary" />Agenda de Hoje</h2>
-          </div>
-          <div className="space-y-3">
-            {appointmentsToday.length === 0 ? <p className="text-sm text-muted-foreground">Sem agendamentos para hoje.</p> : null}
-            {appointmentsToday.map((apt) => (
-              <div key={apt.id} className="flex items-center gap-4 p-3 rounded-lg bg-muted/50 hover:bg-muted/80 transition-colors">
-                <span className="text-sm font-mono font-semibold text-primary w-12">{apt.time}</span>
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-sm truncate">{apt.client}</p>
-                  <p className="text-xs text-muted-foreground truncate">{apt.service} · {apt.professional}</p>
-                </div>
-                <span className={`text-xs font-medium px-2 py-1 rounded-full ${statusColors[apt.status] ?? statusColors.scheduled}`}>{statusLabels[apt.status] ?? apt.status}</span>
+      <div className="glass-card rounded-xl p-5">
+        <h2 className="font-display font-semibold mb-3">Entradas por forma de pagamento (hoje)</h2>
+        {paymentEntries.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Nenhum recebimento hoje.</p>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {paymentEntries.map(([method, value]) => (
+              <div key={method} className="rounded-lg border border-border/60 p-3">
+                <p className="text-sm text-muted-foreground">{paymentMethodLabel(method)}</p>
+                <p className="font-semibold">{toCurrency(value)}</p>
               </div>
             ))}
           </div>
-        </motion.div>
-
-        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="glass-card rounded-xl p-5 space-y-4">
-          <h2 className="font-display text-lg font-semibold flex items-center gap-2"><Bell className="h-4 w-4 text-primary" />Alertas</h2>
-          {alerts.length === 0 ? <p className="text-sm text-muted-foreground">Sem alertas importantes.</p> : null}
-          {alerts.map((alert) => (
-            <div key={alert.id} className={alert.tone === "danger" ? "p-3 rounded-lg bg-destructive/10 text-destructive text-sm" : alert.tone === "warning" ? "p-3 rounded-lg bg-warning/10 text-warning text-sm" : "p-3 rounded-lg bg-primary/10 text-primary text-sm"}>
-              <p className="font-semibold">{alert.title}</p>
-              <p>{alert.description}</p>
-            </div>
-          ))}
-        </motion.div>
+        )}
       </div>
-
-      <Dialog open={showAlertModal && alerts.length > 0} onOpenChange={setShowAlertModal}>
-        <DialogContent>
-          <DialogHeader><DialogTitle className="font-display">Alertas importantes</DialogTitle></DialogHeader>
-          <div className="space-y-3">
-            {alerts.map((alert) => (
-              <div key={`modal-${alert.id}`} className="rounded-md border p-3">
-                <p className="font-medium">{alert.title}</p>
-                <p className="text-sm text-muted-foreground">{alert.description}</p>
-              </div>
-            ))}
-            <Button className="w-full" onClick={() => setShowAlertModal(false)}>Entendi</Button>
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

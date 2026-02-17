@@ -1,7 +1,6 @@
-import { CSSProperties, ReactNode, useMemo, useState } from "react";
+import { ReactNode, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
-  LayoutDashboard,
   Calendar,
   Users,
   UserCog,
@@ -19,7 +18,6 @@ import { useAuth } from "@/hooks/use-auth";
 import { useAppConfig } from "@/lib/app-config";
 
 const navItems = [
-  { title: "Painel", url: "/", icon: LayoutDashboard },
   { title: "Agenda", url: "/agenda", icon: Calendar },
   { title: "Clientes", url: "/clientes", icon: Users },
   { title: "Profissionais", url: "/profissionais", icon: UserCog },
@@ -85,7 +83,7 @@ export default function Layout({ children }: { children: ReactNode }) {
           })}
         </nav>
         <div className="px-4 py-4 border-t space-y-2" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
-          <p className="text-xs truncate" style={{ color: `${config.textColor}CC` }}>{user?.email} • {user?.role === "admin" ? "Admin" : "Profissional"}</p>
+          <p className="text-xs truncate" style={{ color: `${config.textColor}CC` }}>{user?.email}</p>
           <button onClick={() => void logout()} className="text-xs underline">Sair</button>
           <p className="text-xs" style={{ color: `${config.textColor}99` }}>© 2026 {config.salonName || "Salão"}</p>
         </div>

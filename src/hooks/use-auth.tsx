@@ -1,52 +1,35 @@
 import { ReactNode, createContext, useContext, useEffect, useMemo, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase } from "@/lib/supabaseClient";
 
 export type AuthRole = "admin" | "professional";
 
 export type AuthUser = {
   id: string;
   email: string;
+  name: string;
   role: AuthRole;
 };
 
-type LoginResult = { ok: boolean; error?: string };
+type AuthResult = { ok: boolean; error?: string };
 
 type AuthContextValue = {
   user: AuthUser | null;
   isLoading: boolean;
-  login: (email: string, password: string) => Promise<LoginResult>;
+  login: (email: string, password: string) => Promise<AuthResult>;
+  register: (name: string, email: string, password: string) => Promise<AuthResult>;
   logout: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-function normalizeRole(value: unknown): AuthRole | null {
-  if (value === "admin") return "admin";
-  if (value === "employee" || value === "professional") return "professional";
-  return null;
-}
-
-async function getRoleFromDatabase(userId: string): Promise<AuthRole | null> {
-  const { data, error } = await supabase
-    .from("user_roles")
-    .select("role")
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  if (error) throw error;
-  return normalizeRole(data?.role);
-}
-
-async function buildAuthUser(sessionUser: { id: string; email?: string | null }): Promise<AuthUser | null> {
-  if (!sessionUser?.id || !sessionUser?.email) return null;
-
-  const dbRole = await getRoleFromDatabase(sessionUser.id);
-  if (!dbRole) return null;
+function toAuthUser(sessionUser: { id: string; email?: string | null; user_metadata?: Record<string, unknown> }): AuthUser | null {
+  if (!sessionUser.id || !sessionUser.email) return null;
 
   return {
     id: sessionUser.id,
     email: sessionUser.email,
-    role: dbRole,
+    name: String(sessionUser.user_metadata?.name ?? sessionUser.email.split("@")[0]),
+    role: "admin",
   };
 }
 
@@ -58,57 +41,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const bootstrap = async () => {
       const { data } = await supabase.auth.getSession();
       const sessionUser = data.session?.user;
-
-      if (sessionUser) {
-        try {
-          const authUser = await buildAuthUser({ id: sessionUser.id, email: sessionUser.email });
-          setUser(authUser);
-        } catch (error) {
-          console.error("Erro ao carregar role inicial:", error);
-          setUser(null);
-        }
-      }
-
-      const { data: authListener } = supabase.auth.onAuthStateChange(async (_event, session) => {
-        const authUser = session?.user;
-
-        if (!authUser) {
-          setUser(null);
-          setIsLoading(false);
-          return;
-        }
-
-        try {
-          const enriched = await buildAuthUser({ id: authUser.id, email: authUser.email });
-          if (!enriched) {
-            await supabase.auth.signOut();
-            setUser(null);
-            setIsLoading(false);
-            return;
-          }
-
-          setUser(enriched);
-        } catch (error) {
-          console.error("Erro ao resolver role do usuário:", error);
-          await supabase.auth.signOut();
-          setUser(null);
-        }
-
-        setIsLoading(false);
-      });
-
+      setUser(
+        sessionUser
+          ? toAuthUser({
+              id: sessionUser.id,
+              email: sessionUser.email,
+              user_metadata: sessionUser.user_metadata,
+            })
+          : null,
+      );
       setIsLoading(false);
-      return () => authListener.subscription.unsubscribe();
     };
 
-    let cleanup: void | (() => void | Promise<void>);
-    void bootstrap().then((c) => {
-      cleanup = c;
+    void bootstrap();
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      const authUser = session?.user;
+      setUser(
+        authUser
+          ? toAuthUser({
+              id: authUser.id,
+              email: authUser.email,
+              user_metadata: authUser.user_metadata,
+            })
+          : null,
+      );
+      setIsLoading(false);
     });
 
-    return () => {
-      if (cleanup) void cleanup();
-    };
+    return () => authListener.subscription.unsubscribe();
   }, []);
 
   const value = useMemo<AuthContextValue>(
@@ -120,27 +81,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return { ok: false, error: "Informe e-mail e senha para continuar." };
         }
 
-        const { data, error } = await supabase.auth.signInWithPassword({
+        const { error } = await supabase.auth.signInWithPassword({
           email: email.trim(),
           password,
         });
 
-        if (error || !data.user?.id || !data.user.email) {
-          return { ok: false, error: error?.message ?? "Falha ao autenticar." };
+        if (error) return { ok: false, error: error.message };
+        return { ok: true };
+      },
+      register: async (name: string, email: string, password: string) => {
+        if (!name.trim() || !email.trim() || !password) {
+          return { ok: false, error: "Preencha nome, e-mail e senha para criar a conta." };
         }
 
-        const dbRole = await getRoleFromDatabase(data.user.id);
-        if (!dbRole) {
-          await supabase.auth.signOut();
-          return { ok: false, error: "Usuário sem role em user_roles. Solicite liberação ao administrador." };
-        }
-
-        setUser({
-          id: data.user.id,
-          email: data.user.email,
-          role: dbRole,
+        const { error } = await supabase.auth.signUp({
+          email: email.trim(),
+          password,
+          options: {
+            data: { name: name.trim() },
+          },
         });
 
+        if (error) return { ok: false, error: error.message };
         return { ok: true };
       },
       logout: async () => {

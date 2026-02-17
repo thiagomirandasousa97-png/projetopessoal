@@ -1,88 +1,96 @@
 import { useEffect, useMemo, useState } from "react";
 import PageHeader from "@/components/PageHeader";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ArrowUpCircle, ArrowDownCircle, Wallet, CheckCircle } from "lucide-react";
+import { ArrowUpCircle, ArrowDownCircle, Wallet } from "lucide-react";
 import StatCard from "@/components/StatCard";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { toCurrency } from "@/lib/database";
 import { useAuth } from "@/hooks/use-auth";
 import { supabase } from "@/integrations/supabase/client";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { toast } from "@/components/ui/sonner";
+import { paymentMethodLabel } from "@/lib/payments";
 
-type FinanceRow = {
+type ReceivableRow = {
   id: string;
+  appointmentId: string | null;
+  clientId: string | null;
+  clientName: string;
+  serviceName: string;
   description: string;
-  value: number;
-  date: string;
-  status: "pago" | "pendente" | "vencido";
-  payment?: string;
-  category?: string;
+  amount: number;
+  launchDate: string;
+  serviceDate: string;
+  dueDate: string;
+  status: "paid" | "pending" | "overdue";
+  paymentMethod: string;
 };
 
-function toStatus(value: unknown): "pago" | "pendente" | "vencido" {
-  const s = String(value ?? "").toLowerCase();
-  if (s === "paid" || s === "pago") return "pago";
-  if (s === "overdue" || s === "vencido") return "vencido";
-  return "pendente";
-}
+type PayableRow = {
+  id: string;
+  description: string;
+  category: string;
+  amount: number;
+  dueDate: string;
+  status: "paid" | "pending" | "overdue";
+};
 
-function daysOverdue(date: string) {
-  if (!date) return 0;
-  return Math.max(0, Math.floor((Date.now() - new Date(`${date}T00:00:00`).getTime()) / 86400000));
+function normalizeStatus(value: unknown, dueDate: string): "paid" | "pending" | "overdue" {
+  const status = String(value ?? "").toLowerCase();
+  if (status === "paid" || status === "pago") return "paid";
+  if (status === "overdue" || status === "vencido") return "overdue";
+  if (dueDate && status !== "paid" && dueDate < new Date().toISOString().slice(0, 10)) return "overdue";
+  return "pending";
 }
 
 export default function FinancialPage() {
   const { user } = useAuth();
-  const [receivables, setReceivables] = useState<FinanceRow[]>([]);
-  const [payables, setPayables] = useState<FinanceRow[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
-
-  const [newReceivable, setNewReceivable] = useState({ description: "", value: "", date: "", payment: "pix" });
+  const [receivables, setReceivables] = useState<ReceivableRow[]>([]);
+  const [payables, setPayables] = useState<PayableRow[]>([]);
   const [newPayable, setNewPayable] = useState({ description: "", value: "", date: "", category: "Fixa" });
 
   const load = async () => {
     if (!user) return;
-    setIsLoading(true);
-    setLoadError(null);
 
-    try {
-      const [receivablesRes, payablesRes] = await Promise.all([
-        supabase.from("financial_receivables").select("id, description, amount, due_date, status, payment_method").order("created_at", { ascending: false }),
-        supabase.from("financial_payables").select("id, description, amount, due_date, status, category").order("created_at", { ascending: false }),
-      ]);
+    const [receivablesRes, payablesRes] = await Promise.all([
+      supabase
+        .from("financial_receivables")
+        .select("id, appointment_id, client_id, client_name, service_name, description, amount, created_at, service_date, due_date, status, payment_method")
+        .order("created_at", { ascending: false }),
+      supabase.from("financial_payables").select("id, description, amount, due_date, status, category").order("created_at", { ascending: false }),
+    ]);
 
-      if (receivablesRes.error) throw receivablesRes.error;
-      if (payablesRes.error) throw payablesRes.error;
+    if (!receivablesRes.error) {
+      setReceivables(
+        (receivablesRes.data ?? []).map((item) => ({
+          id: String(item.id),
+          appointmentId: item.appointment_id ? String(item.appointment_id) : null,
+          clientId: item.client_id ? String(item.client_id) : null,
+          clientName: String(item.client_name ?? "Nao informado"),
+          serviceName: String(item.service_name ?? "Nao informado"),
+          description: String(item.description ?? ""),
+          amount: Number(item.amount ?? 0),
+          launchDate: String(item.created_at ?? "").slice(0, 10),
+          serviceDate: String(item.service_date ?? ""),
+          dueDate: String(item.due_date ?? ""),
+          status: normalizeStatus(item.status, String(item.due_date ?? "")),
+          paymentMethod: String(item.payment_method ?? ""),
+        })),
+      );
+    }
 
-      setReceivables((receivablesRes.data ?? []).map((item) => ({
-        id: String(item.id),
-        description: String(item.description ?? ""),
-        value: Number(item.amount ?? 0),
-        date: String(item.due_date ?? ""),
-        status: toStatus(item.status),
-        payment: String(item.payment_method ?? "conta"),
-      })));
-
-      setPayables((payablesRes.data ?? []).map((item) => ({
-        id: String(item.id),
-        description: String(item.description ?? "Despesa"),
-        value: Number(item.amount ?? 0),
-        date: String(item.due_date ?? ""),
-        status: toStatus(item.status),
-        category: String(item.category ?? "Geral"),
-      })));
-    } catch (err) {
-      console.error("Erro ao carregar financeiro:", err);
-      setLoadError("Não foi possível carregar o financeiro.");
-    } finally {
-      setIsLoading(false);
+    if (!payablesRes.error) {
+      setPayables(
+        (payablesRes.data ?? []).map((item) => ({
+          id: String(item.id),
+          description: String(item.description ?? ""),
+          category: String(item.category ?? "Geral"),
+          amount: Number(item.amount ?? 0),
+          dueDate: String(item.due_date ?? ""),
+          status: normalizeStatus(item.status, String(item.due_date ?? "")),
+        })),
+      );
     }
   };
 
@@ -91,55 +99,42 @@ export default function FinancialPage() {
   }, [user]);
 
   const totals = useMemo(() => {
-    const incomes = receivables.reduce((acc, item) => acc + item.value, 0);
-    const paidIncomes = receivables.filter(r => r.status === "pago").reduce((acc, item) => acc + item.value, 0);
-    const expenses = payables.reduce((acc, item) => acc + item.value, 0);
-    const paidExpenses = payables.filter(p => p.status === "pago").reduce((acc, item) => acc + item.value, 0);
-    return { incomes, paidIncomes, expenses, paidExpenses, profit: paidIncomes - paidExpenses };
+    const incomes = receivables.reduce((acc, item) => acc + item.amount, 0);
+    const paidIncomes = receivables.filter((item) => item.status === "paid").reduce((acc, item) => acc + item.amount, 0);
+    const expenses = payables.reduce((acc, item) => acc + item.amount, 0);
+    const paidExpenses = payables.filter((item) => item.status === "paid").reduce((acc, item) => acc + item.amount, 0);
+    return { incomes, expenses, profit: paidIncomes - paidExpenses };
   }, [payables, receivables]);
 
   const pendingDebts = useMemo(
-    () => receivables.filter((r) => r.status !== "pago").map((r) => ({ ...r, overdueDays: daysOverdue(r.date) })),
+    () => receivables.filter((item) => item.status !== "paid").map((item) => ({
+      ...item,
+      overdueDays: item.dueDate ? Math.max(0, Math.floor((Date.now() - new Date(`${item.dueDate}T00:00:00`).getTime()) / 86400000)) : 0,
+    })),
     [receivables],
   );
 
-  const markAsPaid = async (table: "financial_receivables" | "financial_payables", id: string) => {
-    try {
-      const { error } = await supabase.from(table).update({ status: "paid", paid_at: new Date().toISOString() }).eq("id", id);
-      if (error) throw error;
-      toast.success("Marcado como pago.");
-      await load();
-    } catch (err) {
-      console.error(err);
-      toast.error("Erro ao marcar como pago.");
+  const markReceivableAsPaid = async (row: ReceivableRow) => {
+    const now = new Date().toISOString();
+    const { error } = await supabase.from("financial_receivables").update({ status: "paid", paid_at: now }).eq("id", row.id);
+    if (error) return;
+
+    if (row.appointmentId) {
+      await supabase.from("appointments").update({ payment_status: "paid", paid_at: now }).eq("id", row.appointmentId);
     }
+
+    await load();
   };
 
-  const addReceivable = async () => {
-    if (!newReceivable.description || !newReceivable.value || !newReceivable.date) return toast.error("Preencha descrição, valor e vencimento.");
-
-    const { error } = await supabase.from("financial_receivables").insert({
-      description: newReceivable.description,
-      amount: Number(newReceivable.value),
-      due_date: newReceivable.date,
-      payment_method: newReceivable.payment,
-      status: "pending",
-    });
-
-    if (error) {
-      toast.error("Erro ao criar conta a receber.");
-      return;
-    }
-
-    setNewReceivable({ description: "", value: "", date: "", payment: "pix" });
-    toast.success("Conta a receber cadastrada.");
+  const markPayableAsPaid = async (id: string) => {
+    await supabase.from("financial_payables").update({ status: "paid", paid_at: new Date().toISOString() }).eq("id", id);
     await load();
   };
 
   const addPayable = async () => {
-    if (!newPayable.description || !newPayable.value || !newPayable.date) return toast.error("Preencha descrição, valor e vencimento.");
+    if (!newPayable.description || !newPayable.value || !newPayable.date) return;
 
-    const { error } = await supabase.from("financial_payables").insert({
+    await supabase.from("financial_payables").insert({
       description: newPayable.description,
       amount: Number(newPayable.value),
       due_date: newPayable.date,
@@ -147,61 +142,61 @@ export default function FinancialPage() {
       status: "pending",
     });
 
-    if (error) {
-      toast.error("Erro ao criar conta a pagar.");
-      return;
-    }
-
     setNewPayable({ description: "", value: "", date: "", category: "Fixa" });
-    toast.success("Conta a pagar cadastrada.");
     await load();
   };
 
   return (
     <div>
-      <PageHeader title="Financeiro" description="Controle de caixa, contas a pagar e contas a receber" />
-
-      {isLoading ? <p className="text-sm text-muted-foreground mb-4">Carregando dados financeiros...</p> : null}
-      {loadError ? <p className="text-sm text-destructive mb-4">{loadError}</p> : null}
+      <PageHeader title="Financeiro" description="Controle de contas a receber, contas a pagar e inadimplencia." />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
         <StatCard title="Entradas" value={toCurrency(totals.incomes)} icon={<ArrowUpCircle className="h-5 w-5" />} />
-        <StatCard title="Saídas" value={toCurrency(totals.expenses)} icon={<ArrowDownCircle className="h-5 w-5" />} />
+        <StatCard title="Saidas" value={toCurrency(totals.expenses)} icon={<ArrowDownCircle className="h-5 w-5" />} />
         <StatCard title="Saldo" value={toCurrency(totals.profit)} icon={<Wallet className="h-5 w-5" />} />
       </div>
 
       <Tabs defaultValue="receivables" className="glass-card rounded-xl p-5">
-        <TabsList className="mb-4"><TabsTrigger value="receivables">Contas a Receber</TabsTrigger><TabsTrigger value="payables">Contas a Pagar</TabsTrigger><TabsTrigger value="debtors">Inadimplência</TabsTrigger></TabsList>
+        <TabsList className="mb-4">
+          <TabsTrigger value="receivables">Contas a Receber</TabsTrigger>
+          <TabsTrigger value="payables">Contas a Pagar</TabsTrigger>
+          <TabsTrigger value="debtors">Inadimplencia</TabsTrigger>
+        </TabsList>
 
         <TabsContent value="receivables" className="space-y-4">
-          <div className="grid md:grid-cols-5 gap-3">
-            <Input placeholder="Descrição" value={newReceivable.description} onChange={(e) => setNewReceivable((s) => ({ ...s, description: e.target.value }))} />
-            <Select value={newReceivable.payment} onValueChange={(v) => setNewReceivable((s) => ({ ...s, payment: v }))}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="pix">PIX</SelectItem>
-                <SelectItem value="cartao">Cartão</SelectItem>
-                <SelectItem value="dinheiro">Dinheiro</SelectItem>
-                <SelectItem value="conta">Conta</SelectItem>
-              </SelectContent>
-            </Select>
-            <Input type="number" placeholder="Valor" value={newReceivable.value} onChange={(e) => setNewReceivable((s) => ({ ...s, value: e.target.value }))} />
-            <Input type="date" value={newReceivable.date} onChange={(e) => setNewReceivable((s) => ({ ...s, date: e.target.value }))} />
-            <Button onClick={() => void addReceivable()}>Adicionar</Button>
-          </div>
-          {receivables.length === 0 ? <p className="text-sm text-muted-foreground">Nenhuma conta a receber cadastrada.</p> : null}
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead><tr className="border-b border-border text-left text-muted-foreground"><th className="pb-2">Descrição</th><th className="pb-2">Valor</th><th className="pb-2">Vencimento</th><th className="pb-2">Pagamento</th><th className="pb-2">Status</th><th className="pb-2">Ação</th></tr></thead>
+              <thead>
+                <tr className="border-b border-border text-left text-muted-foreground">
+                  <th className="pb-2">De quem</th>
+                  <th className="pb-2">Servico</th>
+                  <th className="pb-2">Valor</th>
+                  <th className="pb-2">Lancamento</th>
+                  <th className="pb-2">Previsto</th>
+                  <th className="pb-2">Situacao</th>
+                  <th className="pb-2">Acoes</th>
+                </tr>
+              </thead>
               <tbody>
-                {receivables.map((r, i) => (
-                  <motion.tr key={r.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.02 }} className="border-b border-border/50 hover:bg-muted/30 transition-colors">
-                    <td className="py-3 font-medium">{r.description}</td>
-                    <td className="py-3 font-semibold">{toCurrency(r.value)}</td>
-                    <td className="py-3">{r.date}</td>
-                    <td className="py-3">{r.payment}</td>
-                    <td className="py-3"><span className={cn("px-2 py-0.5 rounded-full text-xs font-medium", r.status === "pago" ? "bg-success/15 text-success" : r.status === "vencido" ? "bg-destructive/15 text-destructive" : "bg-warning/15 text-warning")}>{r.status === "pago" ? "Pago" : r.status === "vencido" ? "Vencido" : "Pendente"}</span></td>
-                    <td className="py-3">{r.status !== "pago" && <Button size="sm" variant="outline" onClick={() => void markAsPaid("financial_receivables", r.id)}>Pagar</Button>}</td>
+                {receivables.map((row, index) => (
+                  <motion.tr key={row.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: index * 0.02 }} className="border-b border-border/50 hover:bg-muted/30 transition-colors">
+                    <td className="py-3">
+                      <p className="font-medium">{row.clientName}</p>
+                      <p className="text-xs text-muted-foreground">{row.description}</p>
+                    </td>
+                    <td className="py-3">{row.serviceName}</td>
+                    <td className="py-3 font-semibold">{toCurrency(row.amount)}</td>
+                    <td className="py-3">{row.launchDate || "-"}</td>
+                    <td className="py-3">{row.dueDate || "-"}</td>
+                    <td className="py-3">
+                      <span className={cn("px-2 py-0.5 rounded-full text-xs font-medium", row.status === "paid" ? "bg-success/15 text-success" : row.status === "overdue" ? "bg-destructive/15 text-destructive" : "bg-warning/15 text-warning")}>
+                        {row.status === "paid" ? "Recebido" : row.status === "overdue" ? "Vencido" : "Pendente"}
+                      </span>
+                      {row.paymentMethod ? <p className="text-xs text-muted-foreground mt-1">{paymentMethodLabel(row.paymentMethod)}</p> : null}
+                    </td>
+                    <td className="py-3">
+                      {row.status !== "paid" ? <Button size="sm" variant="outline" onClick={() => void markReceivableAsPaid(row)}>Receber</Button> : null}
+                    </td>
                   </motion.tr>
                 ))}
               </tbody>
@@ -211,25 +206,38 @@ export default function FinancialPage() {
 
         <TabsContent value="payables" className="space-y-4">
           <div className="grid md:grid-cols-5 gap-3">
-            <Input placeholder="Descrição" value={newPayable.description} onChange={(e) => setNewPayable((s) => ({ ...s, description: e.target.value }))} />
-            <Input placeholder="Categoria" value={newPayable.category} onChange={(e) => setNewPayable((s) => ({ ...s, category: e.target.value }))} />
-            <Input type="number" placeholder="Valor" value={newPayable.value} onChange={(e) => setNewPayable((s) => ({ ...s, value: e.target.value }))} />
-            <Input type="date" value={newPayable.date} onChange={(e) => setNewPayable((s) => ({ ...s, date: e.target.value }))} />
+            <Input placeholder="Descricao" value={newPayable.description} onChange={(event) => setNewPayable((prev) => ({ ...prev, description: event.target.value }))} />
+            <Input placeholder="Categoria" value={newPayable.category} onChange={(event) => setNewPayable((prev) => ({ ...prev, category: event.target.value }))} />
+            <Input type="number" placeholder="Valor" value={newPayable.value} onChange={(event) => setNewPayable((prev) => ({ ...prev, value: event.target.value }))} />
+            <Input type="date" value={newPayable.date} onChange={(event) => setNewPayable((prev) => ({ ...prev, date: event.target.value }))} />
             <Button onClick={() => void addPayable()}>Adicionar</Button>
           </div>
-          {payables.length === 0 ? <p className="text-sm text-muted-foreground">Nenhuma conta a pagar cadastrada.</p> : null}
+
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead><tr className="border-b border-border text-left text-muted-foreground"><th className="pb-2">Descrição</th><th className="pb-2">Categoria</th><th className="pb-2">Valor</th><th className="pb-2">Vencimento</th><th className="pb-2">Status</th><th className="pb-2">Ação</th></tr></thead>
+              <thead>
+                <tr className="border-b border-border text-left text-muted-foreground">
+                  <th className="pb-2">Descricao</th>
+                  <th className="pb-2">Categoria</th>
+                  <th className="pb-2">Valor</th>
+                  <th className="pb-2">Vencimento</th>
+                  <th className="pb-2">Status</th>
+                  <th className="pb-2">Acao</th>
+                </tr>
+              </thead>
               <tbody>
-                {payables.map((p, i) => (
-                  <motion.tr key={p.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.02 }} className="border-b border-border/50 hover:bg-muted/30 transition-colors">
-                    <td className="py-3 font-medium">{p.description}</td>
-                    <td className="py-3">{p.category}</td>
-                    <td className="py-3 font-semibold">{toCurrency(p.value)}</td>
-                    <td className="py-3">{p.date}</td>
-                    <td className="py-3"><span className={cn("px-2 py-0.5 rounded-full text-xs font-medium", p.status === "pago" ? "bg-success/15 text-success" : p.status === "vencido" ? "bg-destructive/15 text-destructive" : "bg-warning/15 text-warning")}>{p.status === "pago" ? "Pago" : p.status === "vencido" ? "Vencido" : "Pendente"}</span></td>
-                    <td className="py-3">{p.status !== "pago" && <Button size="sm" variant="outline" onClick={() => void markAsPaid("financial_payables", p.id)}>Pagar</Button>}</td>
+                {payables.map((row, index) => (
+                  <motion.tr key={row.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: index * 0.02 }} className="border-b border-border/50 hover:bg-muted/30 transition-colors">
+                    <td className="py-3 font-medium">{row.description}</td>
+                    <td className="py-3">{row.category}</td>
+                    <td className="py-3 font-semibold">{toCurrency(row.amount)}</td>
+                    <td className="py-3">{row.dueDate}</td>
+                    <td className="py-3">
+                      <span className={cn("px-2 py-0.5 rounded-full text-xs font-medium", row.status === "paid" ? "bg-success/15 text-success" : row.status === "overdue" ? "bg-destructive/15 text-destructive" : "bg-warning/15 text-warning")}>
+                        {row.status === "paid" ? "Pago" : row.status === "overdue" ? "Vencido" : "Pendente"}
+                      </span>
+                    </td>
+                    <td className="py-3">{row.status !== "paid" ? <Button size="sm" variant="outline" onClick={() => void markPayableAsPaid(row.id)}>Pagar</Button> : null}</td>
                   </motion.tr>
                 ))}
               </tbody>
@@ -238,18 +246,31 @@ export default function FinancialPage() {
         </TabsContent>
 
         <TabsContent value="debtors">
-          {pendingDebts.length === 0 ? <p className="text-sm text-muted-foreground">Sem inadimplência no momento.</p> : null}
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead><tr className="border-b border-border text-left text-muted-foreground"><th className="pb-2">Descrição</th><th className="pb-2">Valor</th><th className="pb-2">Vencimento</th><th className="pb-2">Dias devendo</th><th className="pb-2">Sinal</th></tr></thead>
+              <thead>
+                <tr className="border-b border-border text-left text-muted-foreground">
+                  <th className="pb-2">Cliente</th>
+                  <th className="pb-2">Servico</th>
+                  <th className="pb-2">Valor</th>
+                  <th className="pb-2">Previsto</th>
+                  <th className="pb-2">Dias em atraso</th>
+                  <th className="pb-2">Sinal</th>
+                </tr>
+              </thead>
               <tbody>
-                {pendingDebts.map((d) => (
-                  <tr key={d.id} className="border-b border-border/50 hover:bg-muted/30 transition-colors">
-                    <td className="py-3 font-medium">{d.description}</td>
-                    <td className="py-3">{toCurrency(d.value)}</td>
-                    <td className="py-3">{d.date}</td>
-                    <td className="py-3 font-semibold">{d.overdueDays} dias</td>
-                    <td className="py-3"><span className={cn("px-2 py-0.5 rounded-full text-xs font-medium", d.overdueDays >= 30 ? "bg-destructive/15 text-destructive" : "bg-warning/15 text-warning")}>{d.overdueDays >= 30 ? "Crítico" : "Atenção"}</span></td>
+                {pendingDebts.map((row) => (
+                  <tr key={row.id} className="border-b border-border/50 hover:bg-muted/30 transition-colors">
+                    <td className="py-3 font-medium">{row.clientName}</td>
+                    <td className="py-3">{row.serviceName}</td>
+                    <td className="py-3">{toCurrency(row.amount)}</td>
+                    <td className="py-3">{row.dueDate}</td>
+                    <td className="py-3">{row.overdueDays} dias</td>
+                    <td className="py-3">
+                      <span className={cn("px-2 py-0.5 rounded-full text-xs font-medium", row.overdueDays > 30 ? "bg-destructive/15 text-destructive" : row.overdueDays >= 20 ? "bg-warning/15 text-warning" : "bg-success/15 text-success")}>
+                        {row.overdueDays > 30 ? "Vermelho" : row.overdueDays >= 20 ? "Amarelo" : "Verde"}
+                      </span>
+                    </td>
                   </tr>
                 ))}
               </tbody>

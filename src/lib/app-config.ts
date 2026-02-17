@@ -11,8 +11,6 @@ export type AppConfig = {
   buttonColor: string;
 };
 
-const STORAGE_KEY = "salao-app-config";
-
 export const DEFAULT_CONFIG: AppConfig = {
   salonName: "Salão Danny Miranda",
   showSalonName: true,
@@ -24,34 +22,19 @@ export const DEFAULT_CONFIG: AppConfig = {
   buttonColor: "#d94678",
 };
 
-export function getAppConfig(): AppConfig {
-  const raw = localStorage.getItem(STORAGE_KEY);
-  if (!raw) return DEFAULT_CONFIG;
+let currentConfig: AppConfig = DEFAULT_CONFIG;
 
-  try {
-    const parsed = JSON.parse(raw) as Partial<AppConfig>;
-    return {
-      salonName: parsed.salonName ?? DEFAULT_CONFIG.salonName,
-      showSalonName: parsed.showSalonName ?? DEFAULT_CONFIG.showSalonName,
-      logoText: parsed.logoText ?? DEFAULT_CONFIG.logoText,
-      logoImageDataUrl: parsed.logoImageDataUrl ?? DEFAULT_CONFIG.logoImageDataUrl,
-      logoSizePx: parsed.logoSizePx ?? DEFAULT_CONFIG.logoSizePx,
-      textColor: parsed.textColor ?? DEFAULT_CONFIG.textColor,
-      backgroundColor: parsed.backgroundColor ?? DEFAULT_CONFIG.backgroundColor,
-      buttonColor: parsed.buttonColor ?? DEFAULT_CONFIG.buttonColor,
-    };
-  } catch {
-    return DEFAULT_CONFIG;
-  }
+export function getAppConfig(): AppConfig {
+  return currentConfig;
 }
 
 export function saveAppConfig(config: AppConfig) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+  currentConfig = config;
   window.dispatchEvent(new Event("app-config-updated"));
 }
 
 export function resetAppConfig() {
-  localStorage.removeItem(STORAGE_KEY);
+  currentConfig = DEFAULT_CONFIG;
   window.dispatchEvent(new Event("app-config-updated"));
 }
 

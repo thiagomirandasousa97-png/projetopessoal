@@ -12,8 +12,6 @@ type AlertItem = {
   text: string;
 };
 
-const SESSION_KEY = "alerts-popup-shown";
-
 export default function AlertsPopup() {
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
@@ -22,9 +20,6 @@ export default function AlertsPopup() {
 
   useEffect(() => {
     if (!user) return;
-
-    const alreadyShown = sessionStorage.getItem(SESSION_KEY);
-    if (alreadyShown) return;
 
     const load = async () => {
       const today = new Date().toISOString().slice(0, 10);
@@ -98,7 +93,6 @@ export default function AlertsPopup() {
         if (items.length > 0) {
           setAlerts(items);
           setOpen(true);
-          sessionStorage.setItem(SESSION_KEY, "true");
         }
       } catch (err) {
         console.error("Erro ao carregar alertas:", err);

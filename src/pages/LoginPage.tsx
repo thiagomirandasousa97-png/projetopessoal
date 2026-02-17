@@ -10,8 +10,10 @@ import { Scissors } from "lucide-react";
 
 export default function LoginPage() {
   const navigate = useNavigate();
-  const { login } = useAuth();
+  const { login, register } = useAuth();
 
+  const [isRegister, setIsRegister] = useState(false);
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -21,9 +23,12 @@ export default function LoginPage() {
     event.preventDefault();
     setIsSubmitting(true);
 
-    const result = await login(email, password);
+    const result = isRegister
+      ? await register(name, email, password)
+      : await login(email, password);
+
     if (!result.ok) {
-      setError(result.error ?? "Falha no login.");
+      setError(result.error ?? "Falha na autenticação.");
       setIsSubmitting(false);
       return;
     }
@@ -34,8 +39,10 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden" style={{ background: "linear-gradient(135deg, hsl(20 20% 12%), hsl(346 30% 18%), hsl(20 20% 10%))" }}>
-      {/* Decorative circles */}
+    <div
+      className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden"
+      style={{ background: "linear-gradient(135deg, hsl(20 20% 12%), hsl(346 30% 18%), hsl(20 20% 10%))" }}
+    >
       <div className="absolute top-[-10%] right-[-5%] w-96 h-96 rounded-full opacity-10" style={{ background: "radial-gradient(circle, hsl(346 60% 55%), transparent)" }} />
       <div className="absolute bottom-[-10%] left-[-5%] w-80 h-80 rounded-full opacity-10" style={{ background: "radial-gradient(circle, hsl(38 70% 55%), transparent)" }} />
 
@@ -46,23 +53,66 @@ export default function LoginPage() {
               <Scissors className="h-7 w-7 text-primary-foreground" />
             </div>
             <CardTitle className="font-display text-2xl">Salão Danny Miranda</CardTitle>
-            <p className="text-sm text-muted-foreground">Faça login para acessar o painel</p>
+            <p className="text-sm text-muted-foreground">
+              {isRegister ? "Crie sua conta para começar" : "Faça login para acessar o painel"}
+            </p>
           </CardHeader>
           <CardContent>
             <form className="space-y-4" onSubmit={(e) => void handleSubmit(e)}>
+              {isRegister ? (
+                <div>
+                  <Label htmlFor="name">Nome</Label>
+                  <Input
+                    id="name"
+                    type="text"
+                    placeholder="Seu nome"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    className="mt-1"
+                  />
+                </div>
+              ) : null}
+
               <div>
                 <Label htmlFor="email">E-mail</Label>
-                <Input id="email" type="email" placeholder="seu@email.com" value={email} onChange={(e) => setEmail(e.target.value)} className="mt-1" />
+                <Input
+                  id="email"
+                  type="email"
+                  placeholder="seu@email.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="mt-1"
+                />
               </div>
+
               <div>
                 <Label htmlFor="password">Senha</Label>
-                <Input id="password" type="password" placeholder="••••••" value={password} onChange={(e) => setPassword(e.target.value)} className="mt-1" />
+                <Input
+                  id="password"
+                  type="password"
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="mt-1"
+                />
               </div>
 
               {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
               <Button className="w-full gradient-primary text-primary-foreground text-base py-5" type="submit" disabled={isSubmitting}>
-                {isSubmitting ? "Entrando..." : "Entrar"}
+                {isSubmitting ? "Processando..." : isRegister ? "Criar conta" : "Entrar"}
+              </Button>
+
+              <Button
+                type="button"
+                variant="ghost"
+                className="w-full"
+                onClick={() => {
+                  setIsRegister((prev) => !prev);
+                  setError("");
+                }}
+              >
+                {isRegister ? "Já tenho conta" : "Quero me cadastrar"}
               </Button>
             </form>
           </CardContent>
